@@ -139,6 +139,17 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Rate limiting settings
+RATELIMIT_VIEW = "ip_tracking.views.rate_limit_error"
+RATELIMIT_ENABLE = True
+RATELIMIT_USE_CACHE = "default"
+
+# Rate limit groups
+RATELIMIT_GROUP_HANDLERS = {
+    "login": "ip_tracking.ratelimit_handlers.login_handler",
+    "geo_test": "ip_tracking.ratelimit_handlers.geo_test_handler",
+}
+
 # Cache Configuration
 
 CACHES = {
