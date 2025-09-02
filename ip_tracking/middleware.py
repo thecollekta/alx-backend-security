@@ -20,6 +20,13 @@ class IPLoggingMiddleware:
         # Process request
         response = self.get_response(request)
 
+        # Get geolocation data
+        geo_data = {}
+        if not ip_address.startswith(
+            ("127.", "10.", "192.168.", "172.")
+        ):  # Skip private IPs
+            geo_data = RequestLog.get_geolocation_data(ip_address)
+
         # Log request details after response is processed
         ip_address = self.get_client_ip(request)
 
@@ -29,6 +36,10 @@ class IPLoggingMiddleware:
             path=request.path,
             method=request.method,
             user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            country=geo_data.get("country"),
+            city=geo_data.get("city"),
+            latitude=geo_data.get("latitude"),
+            longitude=geo_data.get("longitude"),
         )
 
         return response

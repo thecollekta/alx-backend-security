@@ -1,4 +1,5 @@
 # ip_tracking/models.py
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
@@ -16,14 +17,61 @@ class RequestLog(models.Model):
     timestamp = models.DateTimeField(default=timezone.now)
     method = models.CharField(max_length=10)
     user_agent = models.TextField(blank=True, null=True)
+    country = models.CharField(max_length=100, blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
 
     class Meta:
         ordering = ["-timestamp"]
         verbose_name = "Request Log"
         verbose_name_plural = "Request Logs"
+        indexes = [
+            models.Index(fields=["ip_address"]),
+            models.Index(fields=["country", "city"]),
+            models.Index(fields=["timestamp"]),
+        ]
 
     def __str__(self):
         return f"{self.ip_address} - {self.path} - {self.timestamp}"
+
+    @classmethod
+    def get_geolocation_data(cls, ip_address):
+        """Get geolocation data from cache or API"""
+        cache_key = f"ip_geo_{ip_address}"
+        geo_data = cache.get(cache_key)
+
+        if geo_data is None:
+            try:
+                import requests
+
+                # Using ip-api.com (free tier)
+                response = requests.get(
+                    f"http://ip-api.com/json/{ip_address}?fields=status,message,country,city,lat,lon"
+                )
+                data = response.json()
+
+                if data.get("status") == "success":
+                    geo_data = {
+                        "country": data.get("country"),
+                        "city": data.get("city"),
+                        "latitude": data.get("lat"),
+                        "longitude": data.get("lon"),
+                    }
+                    # Cache for 24 hours
+                    cache.set(cache_key, geo_data, 60 * 60 * 24)
+                else:
+                    geo_data = {}
+
+            except Exception as e:
+                # Log error but don't fail the request
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to get geolocation for {ip_address}: {str(e)}")
+                geo_data = {}
+
+        return geo_data
 
 
 class BlockedIP(models.Model):

@@ -64,7 +64,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "ip_tracking.middleware.IPLoggingMiddleware",   # IP tracking Middleware
+    "ip_tracking.middleware.IPLoggingMiddleware",  # IP tracking Middleware
 ]
 
 ROOT_URLCONF = "alx_backend_security.urls"
@@ -138,3 +138,11 @@ STATIC_URL = "static/"
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Cache Configuration
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    }
+}

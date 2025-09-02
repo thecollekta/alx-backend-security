@@ -1,14 +1,16 @@
 # IP Tracking Middleware for Django
 
-A lightweight and efficient IP tracking solution for Django applications that logs request details including IP addresses, timestamps, paths, and user agents.
+A lightweight and efficient IP tracking solution for Django applications that provides request logging, IP blacklisting, and geolocation analytics.
 
 ## Features
 
 - **Request Logging**: Automatically logs all incoming requests
 - **IP Blacklisting**: Block malicious or suspicious IP addresses
+- **IP Geolocation**: Automatically logs country and city data for each request
 - **IP Address Tracking**: Accurately captures client IP addresses, even behind proxies
 - **Request Details**: Logs path, HTTP method, and user agent
 - **Performance Optimized**: Minimal impact on request/response cycle
+- **Test Endpoint**: Built-in endpoint for testing geolocation
 - **Security-First**: Properly handles and stores sensitive data
 
 ## Installation
@@ -61,6 +63,62 @@ python manage.py block_ip 192.168.1.100 --reason "Suspicious activity"
 
 Once installed, the middleware will automatically log all incoming requests to the `RequestLog` model.
 
+### Request Logging with Geolocation
+
+All incoming requests are automatically logged with geolocation data. The middleware uses [ip-api.com](https://ip-api.com/) (free tier) to resolve IP addresses to geographic locations.
+
+## Testing Geolocation
+
+### Using the Test Endpoint
+
+A test endpoint is available at `/ip-tracking/test-geo/` to verify geolocation functionality.
+
+#### Example: Test with Ghana IP
+
+1. **Using cURL**:
+
+   ```bash
+   # Test with Ghana IP (MTN Ghana example)
+   curl -X POST http://127.0.0.1:8000/ip-tracking/test-geo/ \
+     -H "Content-Type: application/json" \
+     -d '{"ip": "197.210.64.1"}'  # Example Ghana IP
+   ```
+
+2. **Using Python Requests**:
+
+   ```python
+   import requests
+   
+   response = requests.post(
+       'http://127.0.0.1:8000/ip-tracking/test-geo/',
+       json={'ip': '197.210.64.1'}  # Example Ghana IP
+   )
+   print(response.json())
+   ```
+
+#### Expected Response
+
+```json
+{
+    "ip_address": "197.210.64.1",
+    "method": "POST",
+    "path": "/ip-tracking/test-geo/",
+    "user_agent": "python-requests/2.31.0",
+    "geo_headers": {
+        "x-forwarded-for": "197.210.64.1",
+        "remote_addr": "127.0.0.1"
+    }
+}
+```
+
+### Verifying in Admin
+
+After making test requests, check the admin interface at `http://127.0.0.1:8000/admin/ip_tracking/requestlog/` to see the logged requests with geolocation data. For the Ghana IP, you should see:
+
+- **Country**: Ghana
+- **City**: Accra (or another Ghanaian city depending on the IP)
+- **Coordinates**: Latitude and longitude for the location
+
 ### Viewing Logs
 
 You can access the logs through the Django admin interface or via the shell:
@@ -93,6 +151,23 @@ is_blocked = BlockedIP.objects.filter(ip_address='192.168.1.100').exists()
 recent_logs = RequestLog.objects.order_by('-timestamp')[:100]
 ```
 
+### Viewing Geolocation Data
+
+Access logs through the Django admin interface or via the shell:
+
+```python
+from ip_tracking.models import RequestLog
+
+# Get all requests from a specific country
+gh_requests = RequestLog.objects.filter(country='Ghana')
+
+# Get requests from a specific city
+acc_requests = RequestLog.objects.filter(city='Accra')
+
+# Get requests with geolocation data
+geo_requests = RequestLog.objects.exclude(country__isnull=True)
+```
+
 ### Admin Integration
 
 The `RequestLog` model is registered in the admin interface by default. To access it:
@@ -109,12 +184,17 @@ The `RequestLog` model contains the following fields:
 - `method`: HTTP method (GET, POST, etc.)
 - `timestamp`: When the request was made (auto-populated)
 - `user_agent`: Client's user agent string (if available)
+- `country`: Detected country name
+- `city`: Detected city name
+- `latitude`: Geographic latitude
+- `longitude`: Geographic longitude
 
 The `BlockedIP` model contains the following fields:
 
 - `ip_address`: Blocked IP address (unique)
 - `created_at`: When the IP was blocked (auto-populated)
 - `reason`: Optional reason for blocking the IP
+- `is_active`: Whether the block is currently active
 
 ## Security & Privacy
 
@@ -132,6 +212,10 @@ The `BlockedIP` model contains the following fields:
   - Using a dedicated logging solution
   - Implementing request sampling for logging
   - Using database read replicas for log queries
+- Geolocation data is cached for 24 hours to minimize API calls
+- Database indexes are added for efficient querying
+- Private IP addresses (127.x.x.x, 10.x.x.x, 192.168.x.x, 172.16.x.x) are automatically skipped for geolocation
+- Consider using a more robust cache backend (like Redis) in production
 
 ## Management Commands
 
@@ -147,6 +231,17 @@ python manage.py block_ip <ip_address> [--reason REASON]
 
 - `ip_address`: The IP address to block (required)
 - `--reason`: Optional reason for blocking the IP
+
+## Troubleshooting
+
+1. **No Geolocation Data?**
+   - Check if the IP is a private address (starts with 10., 172., 192.168., etc.)
+   - Verify your internet connection (required for geolocation lookups)
+   - Check the Django error logs for geolocation API errors
+
+2. **Testing Local Development**
+   - For localhost (127.0.0.1), geolocation will be skipped
+   - Use the test endpoint with the `X-Forwarded-For` header or the POST method to test specific IPs
 
 ## License
 
