@@ -1,8 +1,13 @@
 # ip_tracking/models.py
+from datetime import timedelta
+
+from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Count
 from django.utils import timezone
+from django.utils.timezone import now
 from django.utils.translation import gettext_lazy as _
 
 
@@ -104,3 +109,89 @@ class BlockedIP(models.Model):
         except ValidationError as e:
             raise ValidationError(_(f"Invalid IP address: {self.ip_address}")) from e
         super().save(*args, **kwargs)
+
+
+class SuspiciousIP(models.Model):
+    class SuspicionReason(models.TextChoices):
+        HIGH_REQUEST_VOLUME = "high_volume", "High request volume"
+        SENSITIVE_PATH = "sensitive_path", "Accessed sensitive path"
+        MULTIPLE_VIOLATIONS = "multiple", "Multiple violations"
+
+    ip_address = models.GenericIPAddressField(unique=True)
+    reason = models.CharField(max_length=20, choices=SuspicionReason.choices)
+    first_detected = models.DateTimeField(auto_now_add=True)
+    last_detected = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)
+    details = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Suspicious IP"
+        verbose_name_plural = "Suspicious IPs"
+        ordering = ["-last_detected"]
+
+    def __str__(self):
+        return f"{self.ip_address} - {self.get_reason_display()}"
+
+    @classmethod
+    def detect_suspicious_activity(cls):
+        """
+        Detects suspicious IPs based on request patterns
+        """
+        from ip_tracking.models import RequestLog
+
+        one_hour_ago = now() - timedelta(hours=1)
+
+        # Detect high volume requests
+        high_volume_ips = (
+            RequestLog.objects.filter(timestamp__gte=one_hour_ago)
+            .values("ip_address")
+            .annotate(request_count=Count("id"))
+            .filter(request_count__gt=100)
+            .values_list("ip_address", flat=True)
+        )
+
+        for ip in high_volume_ips:
+            cls.objects.update_or_create(
+                ip_address=ip,
+                defaults={
+                    "reason": cls.SuspicionReason.HIGH_REQUEST_VOLUME,
+                    "details": {
+                        "request_count": RequestLog.objects.filter(
+                            ip_address=ip, timestamp__gte=one_hour_ago
+                        ).count()
+                    },
+                    "is_active": True,
+                },
+            )
+
+        # Detect access to sensitive paths
+        sensitive_paths = getattr(settings, "SENSITIVE_PATHS", ["/admin/", "/login/"])
+        suspicious_path_ips = (
+            RequestLog.objects.filter(
+                timestamp__gte=one_hour_ago, path__in=sensitive_paths
+            )
+            .values_list("ip_address", flat=True)
+            .distinct()
+        )
+
+        for ip in suspicious_path_ips:
+            cls.objects.update_or_create(
+                ip_address=ip,
+                defaults={
+                    "reason": cls.SuspicionReason.SENSITIVE_PATH,
+                    "details": {
+                        "paths_accessed": list(
+                            RequestLog.objects.filter(
+                                ip_address=ip,
+                                timestamp__gte=one_hour_ago,
+                                path__in=sensitive_paths,
+                            )
+                            .values_list("path", flat=True)
+                            .distinct()
+                        )
+                    },
+                    "is_active": True,
+                },
+            )
+
+        return cls.objects.filter(is_active=True).count()

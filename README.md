@@ -8,6 +8,7 @@ A comprehensive Django application that provides IP tracking, geolocation, rate 
 - **Request Logging**: Detailed request tracking with metadata
 - **IP Blacklisting**: Block malicious or suspicious IPs
 - **Rate Limiting**: Protect against abuse
+- **Anomaly Detection**: Automatic detection of suspicious activity
 - **Admin Interface**: Easy management of logs and blocked IPs
 - **Caching**: Optimized performance with request caching
 
@@ -32,17 +33,26 @@ A comprehensive Django application that provides IP tracking, geolocation, rate 
     INSTALLED_APPS = [
         # ...
         'ip_tracking',
+        'django_celery_beat',
+        'django_celery_results',
     ]
 
-    MIDDLEWARE = [
-        # ...
-        'ip_tracking.middleware.IPLoggingMiddleware',
+    # IP Tracking Settings
+    SUSPICIOUS_REQUEST_THRESHOLD = 100  # requests per hour
+    SENSITIVE_PATHS = [
+        '/admin/',
+        '/login/',
+        '/api/auth/',
     ]
 
-    # Rate limiting settings
-    RATELIMIT_VIEW = 'ip_tracking.views.rate_limit_error'
-    RATELIMIT_ENABLE = True
-    RATELIMIT_USE_CACHE = "default"
+    # Celery Configuration
+    CELERY_BROKER_URL = 'redis://localhost:6379/0'
+    CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+    CELERY_ACCEPT_CONTENT = ['json']
+    CELERY_TASK_SERIALIZER = 'json'
+    CELERY_RESULT_SERIALIZER = 'json'
+    CELERY_TIMEZONE = 'UTC'
+    CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
     ```
 
 4. Run migrations:
@@ -51,11 +61,67 @@ A comprehensive Django application that provides IP tracking, geolocation, rate 
     python manage.py migrate
     ```
 
-5. Create a superuser:
+5. Start Redis (required for Celery):
 
     ```bash
-    python manage.py createsuperuser
+    # On Linux
+    sudo service redis-server start
+    
+    # On Windows
+    # Download and install Redis from: https://github.com/microsoftarchive/redis/releases
     ```
+
+6. Start Celery worker and beat (in separate terminals):
+
+    ```bash
+    # Terminal 1 - Celery worker
+    celery -A alx_backend_security worker --loglevel=info -P solo
+    
+    # Terminal 2 - Celery beat
+    celery -A alx_backend_security beat --loglevel=info
+    ```
+
+## Anomaly Detection
+
+The system includes automated anomaly detection that runs hourly to identify suspicious activity:
+
+### Detection Rules
+
+1. **High Volume Requests**:
+   - Flags IPs making more than 100 requests per hour (configurable via `SUSPICIOUS_REQUEST_THRESHOLD`)
+   - Logs to `SuspiciousIP` model with reason 'high_volume'
+
+2. **Sensitive Path Access**:
+   - Monitors access to sensitive paths (default: `/admin/`, `/login/`, `/api/auth/`)
+   - Logs to `SuspiciousIP` model with reason 'sensitive_path'
+
+### Monitoring Suspicious Activity
+
+View detected suspicious IPs in the admin interface at `/admin/ip_tracking/suspiciousip/` or via the Django shell:
+
+```python
+from ip_tracking.models import SuspiciousIP
+
+# Get all active suspicious IPs
+suspicious_ips = SuspiciousIP.objects.filter(is_active=True)
+
+# Get IPs flagged for high volume
+high_volume_ips = SuspiciousIP.objects.filter(reason='high_volume')
+```
+
+### Manual Trigger
+
+You can manually trigger the anomaly detection task:
+
+```python
+from ip_tracking.tasks import detect_suspicious_activity
+
+# Run synchronously
+result = detect_suspicious_activity()
+
+# Or asynchronously
+result = detect_suspicious_activity.delay()
+```
 
 ## Usage
 
@@ -105,6 +171,12 @@ POST /ip-tracking/login/
 
 ```bash
 python manage.py block_ip 192.168.1.100 --reason "Suspicious activity"
+```
+
+#### Run Anomaly Detection Manually
+
+```bash
+python manage.py shell -c "from ip_tracking.tasks import detect_suspicious_activity; detect_suspicious_activity()"
 ```
 
 ### Admin Interface
@@ -177,6 +249,7 @@ CACHES = {
 - Rate limiting helps prevent brute force attacks
 - Admin interface is protected by Django's authentication
 - Sensitive endpoints require authentication
+- Automated anomaly detection runs hourly to identify suspicious patterns
 
 ## License
 
